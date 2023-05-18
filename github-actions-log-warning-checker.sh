@@ -1,7 +1,7 @@
 #!/bin/bash
 # DOT NOT REMOVE TRAILING NEW LINE IN THE INPUT CSV FILE
 
-# Usage: 
+# Usage:
 # Step 0: Run `gh auth login` to authenticate with GitHub CLI
 # Step 1: Run ./generate-repos.sh <org> > repos.csv
 #    (or create a list of repos in a csv file, 1 per line, with a trailing empty line at the end of the file)
@@ -31,9 +31,9 @@ fi
 
 
 
-echo "repo,workflow_name,workflow_url,found_in_latest_workflow_run" > $output
+echo "repo,workflow_name,workflow_url,found_in_latest_workflow_run,bad_actions" > $output
 
-while read -r repofull ; 
+while read -r repofull ;
 do
     IFS='/' read -ra data <<< "$repofull"
 
@@ -59,13 +59,30 @@ do
             echo "    >> Checking run: $run_display_title ($run_id)"
             run_output=$(gh run view $run_id -R $org/$repo)
             if [[ $run_output == *"$WARNING_LOG_MESSAGE"* ]]; then
-                echo "      >> !!! found deprecated message"
+
+                log=$(gh run view $run_id -R $org/$repo --log)
+                bad_steps=$(echo "$log" | awk "/$WARNING_LOG_MESSAGE/" | cut -d '	' -f1-2 | sort | uniq)
+                bad_actions=""
+
+                while read -r step; do
+                    if [[ $bad_actions != "" ]]; then
+                        bad_actions="$bad_actions,"
+                    fi
+                    bad_actions="$bad_actions$(echo "$log" | awk "/^$step/" | head -1 | cut -d '	' -f3 | cut -d ' ' -f3- | uniq)"
+                done <<< "$bad_steps"
+                bad_actions=$(echo "$bad_actions" | tr ',' '\n' | sort | uniq | tr '\n' ';' | sed 's/;$//')
+
+                if [[ "$bad_actions" == "" ]]; then
+                    bad_actions="(Logs not available)"
+                fi
+
+                echo "      >> !!! found deprecated message (bad actions: $bad_actions)"
                 if [[ $i == 0 ]]; then
                     latest="yes"
                 else
                     latest="no"
                 fi
-                echo "$org/$repo,$workflow_name,$workflow_url,$latest" >> $output
+                echo "$org/$repo,$workflow_name,$workflow_url,$latest,$bad_actions" >> $output
                 break
             fi
             i=$((i+1))
